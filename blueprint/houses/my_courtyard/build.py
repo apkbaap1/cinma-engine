@@ -151,7 +151,11 @@ def ground_mat():
     hs.inputs["Value"].default_value = 0.38
     L.new(col, hs.inputs["Color"])
     dark = K.ramp(N, L, K.noise_tex(N, L, v, 0.03, 3.0), [(0.35, (0.45, 0.45, 0.45)), (0.65, (1.0, 1.0, 1.0))])
-    L.new(K.mix_rgb(N, L, 1.0, hs.outputs["Color"], dark, "MULTIPLY"), b.inputs["Base Color"])
+    # haze by distance from the camera, so the valley and the far slopes fade into the fog like the ridges (ref 1)
+    cam = N.new("ShaderNodeCameraData")
+    haze = K.math_node(N, L, "SUBTRACT", 1.0, K.math_node(N, L, "EXPONENT", K.math_node(N, L, "MULTIPLY", cam.outputs["View Distance"], -1.0 / float(OPTS.get("haze_d", 500)))))
+    fogc = (0.74, 0.78, 0.82, 1) if DAY else (0.2, 0.24, 0.3, 1)
+    L.new(K.mix_rgb(N, L, haze, K.mix_rgb(N, L, 1.0, hs.outputs["Color"], dark, "MULTIPLY"), fogc), b.inputs["Base Color"])
     K.inp(b, "Roughness", 0.8)
     nm = N.new("ShaderNodeNormalMap")
     nm.inputs["Strength"].default_value = 1.0
@@ -985,9 +989,13 @@ def site_z(x, y):
     d = math.hypot(dx, dy)
     z = -0.05 - 0.08 * sstep(0.0, 3.0, d)
     z += 0.5 * fbm(x, y, 0.05, 4, 3.0) * sstep(1.0, 8.0, d)
-    ne = (x - 7.0) * 0.55 + (y - 7.0) * 0.83  # the valley side
-    z -= 22.0 * sstep(14.0, 90.0, ne)
-    z += 9.0 * sstep(18.0, 110.0, -ne) * (0.6 + 0.4 * fbm(x, y, 0.02, 3, 5.0))
+    # ref 1: the plateau breaks off to the north-west (the aerial's view) into a deep valley; forested hills rise
+    # beyond it and on both flanks, so the valley reads as a V filled with fog
+    vw = (x - 7.0) * -0.69 + (y - 7.0) * 0.72
+    lat = (x - 7.0) * 0.72 + (y - 7.0) * 0.69
+    z -= 62.0 * sstep(16.0, 55.0, vw)
+    z += 34.0 * sstep(55.0, 150.0, abs(lat)) * sstep(30.0, 110.0, vw) * (0.7 + 0.3 * fbm(x, y, 0.02, 3, 9.0))
+    z += 9.0 * sstep(18.0, 110.0, -vw) * (0.6 + 0.4 * fbm(x, y, 0.02, 3, 5.0))
     return z
 
 
@@ -1036,7 +1044,7 @@ for i, (x, y) in enumerate(((-1.8, 7.0), (15.8, 6.0), (2.0, -2.2), (12.5, 15.9),
     place_variant("shrub_02", x, y, site_z(x, y) - 0.05, yaw=i * 71, height=random.uniform(0.6, 1.1), k=i)
 rr = random.Random(5)
 for i in range(30):
-    a = math.radians(rr.uniform(15, 285))  # all round but the south-east, where the aerial stands
+    a = math.radians(rr.choice((rr.uniform(15, 100), rr.uniform(170, 285))))  # framing the sides: clear to the south-east (the aerial) and the north-west (the valley it looks into)
     r = rr.uniform(12.0, 21.0)
     x, y = 7 + r * math.cos(a), 7 + r * math.sin(a)
     place_variant(TREE("pine_tree_01") if i % 3 else TREE("fir_tree_01"), x, y, site_z(x, y) - 0.15, yaw=rr.uniform(0, 360), height=rr.uniform(11, 17), k=100 + i)
@@ -1074,13 +1082,15 @@ def ridge_layer(name, dist, h0, amp, mat, seed, a0=-180, a1=180):
 
 
 FOG = (0.72, 0.78, 0.86) if DAY else (0.36, 0.41, 0.5)
-RIDGES = (((170, -25, 45, (0.16, 0.24, 0.2), 0.42), (300, -20, 70, (0.3, 0.38, 0.4), 0.58), (520, -10, 105, (0.44, 0.52, 0.6), 0.72),
+RIDGES = (((170, -25, 45, (0.12, 0.2, 0.14), 0.22), (300, -20, 70, (0.22, 0.3, 0.3), 0.4), (520, -10, 105, (0.44, 0.52, 0.6), 0.72),
            (900, 10, 150, (0.55, 0.62, 0.72), 0.85)) if DAY else
           ((170, -25, 45, (0.06, 0.085, 0.09), 0.45), (300, -20, 70, (0.12, 0.15, 0.18), 0.6), (520, -10, 105, (0.19, 0.22, 0.28), 0.74),
            (900, 10, 150, (0.25, 0.29, 0.36), 0.86)))
 for i, (d, h0, amp, near, kf) in enumerate(RIDGES):
     ridge_layer(f"ridge_{i}", d, h0, amp, fog_mat(f"ridge_{i}", near, FOG, h0 + amp, kf), 3.0 + i * 7)
-box("mist_0", 7 - 900, 7 + 900, 7 - 900, 7 + 900, -14.0, -13.99, mist_mat("mist_0", (0.8, 0.84, 0.9) if DAY else (0.24, 0.28, 0.35), 0.55 if DAY else 0.5), bevel=0)
+# fog lying in the valley in two layers (ref 1), the upper one threading through the trees on the slopes
+box("mist_0", 7 - 900, 7 + 900, 7 - 900, 7 + 900, -58.0, -57.99, mist_mat("mist_0", (0.86, 0.88, 0.9) if DAY else (0.24, 0.28, 0.35), 0.75 if DAY else 0.5), bevel=0)
+box("mist_1", 7 - 900, 7 + 900, 7 - 900, 7 + 900, -44.0, -43.99, mist_mat("mist_1", (0.9, 0.9, 0.9) if DAY else (0.24, 0.28, 0.35), 0.2 if DAY else 0.25), bevel=0)
 # grass clumps on the plateau around the house
 for i in range(160):
     a = random.uniform(0, 2 * math.pi)
@@ -1089,6 +1099,14 @@ for i in range(160):
     if -2.0 < x < 16.0 and -3.5 < y < 16.0:
         continue
     place_variant("grass_medium_01", x, y, site_z(x, y) - 0.03, yaw=random.uniform(0, 360), height=random.uniform(0.25, 0.5), k=i)
+# the forest down the valley sides and up the far slope (ref 1)
+rv = random.Random(23)
+for i in range(180):
+    vw, lat = rv.uniform(24, 115), rv.uniform(-170, 170)
+    if vw < 60 and abs(lat) < 22:
+        continue  # the view down the valley from the house stays open
+    x, y = 7 + vw * -0.69 + lat * 0.72, 7 + vw * 0.72 + lat * 0.69
+    place_variant(TREE("fir_tree_01") if i % 3 else TREE("pine_tree_01"), x, y, site_z(x, y) - 0.3, yaw=rv.uniform(0, 360), height=rv.uniform(12, 20), k=300 + i)
 # the forest on the slopes below and behind
 for i in range(70):
     a = random.uniform(0, 2 * math.pi)
@@ -1150,7 +1168,7 @@ if DAY:
 # ---------------------------------------------------------------- shots
 SHOT = {
     # ref 2: high over the south-west corner, the roofs around the court, the valley and the ridges beyond
-    "aerial": dict(loc=vec("aerial_loc", (17.8, -4.6, 6.4)), target=vec("aerial_at", (6.2, 7.6, 0.2)), lens=float(OPTS.get("aerial_lens", 21)), ev=0.75 if DAY else 0.4, sun=(200, 22)),
+    "aerial": dict(loc=vec("aerial_loc", (19.0, -6.2, 10.2)), target=vec("aerial_at", (5.6, 8.4, 2.6)), lens=float(OPTS.get("aerial_lens", 22)), ev=0.75 if DAY else 0.4, sun=(200, 22)),
     # low over the south-west corner: the cedar wall, the lit glass of the entry, the maple over the roof, the ridges
     "corner": dict(loc=vec("corner_loc", (-4.2, -4.6, 4.6)), target=vec("corner_at", (8.0, 8.5, 1.4)), lens=float(OPTS.get("corner_lens", 20)), ev=-0.2 if DAY else 0.5),
     # straight down into the court between the roofs
