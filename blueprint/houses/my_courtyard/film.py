@@ -189,7 +189,8 @@ gl.new(K.math_node(gn, gl, "ABSOLUTE", K.math_node(gn, gl, "DIVIDE", d_r, BAND.o
 gl.new(edge.outputs[0], g_out.inputs["edge"])
 
 
-WAVE_KEYS = [(T_WAVE, -2.0), (T_WAVE + 0.6, 4.0), (T_WAVE + 1.6, 16.0), (T_WAVE + 2.6, 60.0), (T_WAVE + 4.0, 1400.0)]
+# past the house the wave runs out fast: the land falls into the valley below the desk, so the desk must not linger
+WAVE_KEYS = [(T_WAVE, -2.0), (T_WAVE + 0.6, 4.0), (T_WAVE + 1.6, 16.0), (T_WAVE + 2.2, 90.0), (T_WAVE + 3.0, 1400.0)]
 
 
 def R_at(t):
@@ -226,7 +227,7 @@ def reach(dist_m):
     return T(f)
 
 
-SITE_MATS = {M["ground"].name, M["gravel_site"].name, M["crawl"].name, "mist_0"} | {f"ridge_{i}" for i in range(4)}
+SITE_MATS = {M["ground"].name, M["gravel_site"].name, M["crawl"].name, "mist_0", "mist_1"} | {f"ridge_{i}" for i in range(4)}
 PAPER_MATS = {"sketch", "desk"}
 
 
